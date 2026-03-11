@@ -659,9 +659,14 @@ struct SettingsView: View {
 
                     // About
                     settingSection("ABOUT") {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("PrivateCopyClip v2.0")
-                                .font(.callout)
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text("PrivateCopyClip v2.0.1")
+                                    .font(.callout)
+                                Spacer()
+                                Link("Changelog ↗", destination: URL(string: "https://github.com/BogdanAlinTudorache/PrivateCopyClip/commits/main/")!)
+                                    .font(.caption)
+                            }
                             Text("All data is stored locally on your Mac. Nothing leaves your device.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
