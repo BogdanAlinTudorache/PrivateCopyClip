@@ -75,10 +75,20 @@ echo "✅ Build complete!"
 echo "   $BUILD_DIR/$APP_NAME.app"
 echo ""
 
+# Quit running instance before replacing
+if pgrep -x "$APP_NAME" > /dev/null; then
+    echo "⏹  Quitting running $APP_NAME..."
+    pkill -x "$APP_NAME"
+    sleep 0.5
+fi
+
 # Install to Applications
 echo "📦 Installing to /Applications..."
 rm -rf "/Applications/$APP_NAME.app"
 cp -r "$BUILD_DIR/$APP_NAME.app" "/Applications/"
 echo "✅ Installed: /Applications/$APP_NAME.app"
 echo ""
-echo "▶  open /Applications/$APP_NAME.app"
+
+# Relaunch
+echo "▶  Launching $APP_NAME..."
+open "/Applications/$APP_NAME.app"
