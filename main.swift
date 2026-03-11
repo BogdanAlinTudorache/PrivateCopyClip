@@ -1,6 +1,14 @@
 import SwiftUI
 import Foundation
 
+extension Color {
+    init(hex: String) {
+        var s = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        var n: UInt64 = 0; Scanner(string: s).scanHexInt64(&n)
+        self.init(red: Double((n >> 16) & 0xFF)/255, green: Double((n >> 8) & 0xFF)/255, blue: Double(n & 0xFF)/255)
+    }
+}
+
 // MARK: - Data Models
 
 struct ClipboardEntry: Codable, Identifiable {
@@ -129,6 +137,7 @@ final class ClipboardMonitor: NSObject, ObservableObject {
     @AppStorage("passwordDetectionEnabled") var passwordDetectionEnabled: Bool = true
     @AppStorage("autoClearEnabled")       var autoClearEnabled:       Bool   = true
     @AppStorage("appTheme")               var appTheme:               String = AppTheme.system.rawValue
+    @AppStorage("appPreset")              var appPreset:              String = "default"
 
     private var pollingTimer: Timer?
     private var writeTimer:   Timer?
@@ -503,6 +512,34 @@ struct ClipboardHistoryView: View {
 
 struct SettingsView: View {
     @ObservedObject var monitor: ClipboardMonitor
+    @State private var updateStatus = ""
+    @State private var isChecking   = false
+
+    private func checkForUpdates() {
+        isChecking = true; updateStatus = ""
+        DispatchQueue.global().async {
+            let path = "/Users/bogdantudorache/Desktop/Projects/PrivateCopyClip"
+            let pull = Process()
+            pull.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            pull.arguments = ["-C", path, "pull"]
+            let pipe = Pipe(); pull.standardOutput = pipe
+            try? pull.run(); pull.waitUntilExit()
+            let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            if out.lowercased().contains("already up to date") {
+                DispatchQueue.main.async { isChecking = false; updateStatus = "✓ Already up to date." }
+            } else {
+                DispatchQueue.main.async { updateStatus = "Update found — building…" }
+                let build = Process()
+                build.executableURL = URL(fileURLWithPath: "/bin/zsh")
+                build.arguments = ["-c", "\(path)/build.sh"]
+                try? build.run(); build.waitUntilExit()
+                DispatchQueue.main.async {
+                    isChecking = false
+                    updateStatus = build.terminationStatus == 0 ? "✓ Updated! Relaunch to apply." : "✗ Build failed — check console."
+                }
+            }
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -564,16 +601,33 @@ struct SettingsView: View {
 
                     // Appearance
                     settingSection("APPEARANCE") {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Theme")
-                                .font(.callout)
-                            Picker("Theme", selection: $monitor.appTheme) {
-                                ForEach(AppTheme.allCases, id: \.rawValue) { theme in
-                                    Text(theme.label).tag(theme.rawValue)
+                        VStack(alignment: .leading, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Color scheme")
+                                    .font(.callout)
+                                Picker("Theme", selection: $monitor.appTheme) {
+                                    ForEach(AppTheme.allCases, id: \.rawValue) { theme in
+                                        Text(theme.label).tag(theme.rawValue)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                                .labelsHidden()
+                            }
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Preset")
+                                    .font(.callout)
+                                Picker("Preset", selection: $monitor.appPreset) {
+                                    Text("Default").tag("default")
+                                    Text("Tokyo Night").tag("tokyoNight")
+                                }
+                                .pickerStyle(.segmented)
+                                .labelsHidden()
+                                if monitor.appPreset == "tokyoNight" {
+                                    Text("Auto-switches background between #e6e7ed (light) and #24283b (dark)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
                                 }
                             }
-                            .pickerStyle(.segmented)
-                            .labelsHidden()
                         }
                     }
 
@@ -585,6 +639,21 @@ struct SettingsView: View {
 
                             Toggle("Auto-clear entries older than 30 days", isOn: $monitor.autoClearEnabled)
                                 .font(.callout)
+                        }
+                    }
+
+                    // Updates
+                    settingSection("UPDATES") {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Button(isChecking ? "Checking…" : "Check for Updates") {
+                                checkForUpdates()
+                            }
+                            .disabled(isChecking)
+                            if !updateStatus.isEmpty {
+                                Text(updateStatus)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
 
@@ -635,10 +704,7 @@ struct SettingsView: View {
 
 struct ContentView: View {
     @ObservedObject var monitor: ClipboardMonitor
-
-    private var scheme: ColorScheme? {
-        AppTheme(rawValue: monitor.appTheme)?.colorScheme
-    }
+    @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
         Group {
@@ -647,7 +713,21 @@ struct ContentView: View {
             case .settings: SettingsView(monitor: monitor)
             }
         }
-        .preferredColorScheme(scheme)
+        .background(tokyoBackground)
+        .onAppear { applyTheme() }
+        .onChange(of: monitor.appTheme) { _ in applyTheme() }
+    }
+
+    private func applyTheme() {
+        let t = AppTheme(rawValue: monitor.appTheme) ?? .system
+        NSApp.appearance = t == .light ? NSAppearance(named: .aqua)
+                         : t == .dark  ? NSAppearance(named: .darkAqua)
+                         : nil
+    }
+
+    private var tokyoBackground: Color {
+        guard monitor.appPreset == "tokyoNight" else { return .clear }
+        return colorScheme == .dark ? Color(hex: "24283b") : Color(hex: "e6e7ed")
     }
 }
 
