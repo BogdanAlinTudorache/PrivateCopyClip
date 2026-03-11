@@ -341,7 +341,6 @@ struct ClipboardEntryRow: View {
 struct ClipboardHistoryView: View {
     @ObservedObject var monitor: ClipboardMonitor
     @State private var searchText = ""
-    @State private var showClearConfirm = false
 
     private var displayGroups: [DateGroup] {
         guard !searchText.isEmpty else { return monitor.groupedEntries }
@@ -437,17 +436,21 @@ struct ClipboardHistoryView: View {
                 // Clear all
                 if !monitor.entries.isEmpty {
                     Button {
-                        showClearConfirm = true
+                        let alert = NSAlert()
+                        alert.messageText = "Clear all clipboard history?"
+                        alert.informativeText = "This action cannot be undone."
+                        alert.alertStyle = .warning
+                        alert.addButton(withTitle: "Clear All")
+                        alert.addButton(withTitle: "Cancel")
+                        if alert.runModal() == .alertFirstButtonReturn {
+                            monitor.clearAll()
+                        }
                     } label: {
                         Image(systemName: "trash")
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
                     .help("Clear all history")
-                    .confirmationDialog("Clear all clipboard history?", isPresented: $showClearConfirm, titleVisibility: .visible) {
-                        Button("Clear All", role: .destructive) { monitor.clearAll() }
-                        Button("Cancel",    role: .cancel) { }
-                    }
                 }
 
                 // Settings

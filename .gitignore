@@ -2,3 +2,7 @@ build/
 *.o
 *.d
 .DS_Store
+plan.md
+research.md
+todo.md
+TESTING.md

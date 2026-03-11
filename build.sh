@@ -1,91 +1,84 @@
 #!/bin/bash
 
-# CopyClip Build Script
-# Compiles Swift source and creates macOS app bundle
-
+# PrivateCopyClip Build Script
 set -e
 
 APP_NAME="PrivateCopyClip"
-BUNDLE_ID="com.privatecopy.clipboard"
-VERSION="1.0"
 BUILD_DIR="$(pwd)/build"
-APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
+CONTENTS_DIR="$BUILD_DIR/$APP_NAME.app/Contents"
+MACOS_DIR="$CONTENTS_DIR/MacOS"
+RESOURCES_DIR="$CONTENTS_DIR/Resources"
+ICONSET_DIR="$(pwd)/iconset"
 
 echo "🔨 Building $APP_NAME..."
 
-# Create build directory
-mkdir -p "$BUILD_DIR"
-rm -rf "$APP_BUNDLE"
+# Clean previous build
+rm -rf "$BUILD_DIR"
+mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
-# Create app bundle structure
-mkdir -p "$APP_BUNDLE/Contents/MacOS"
-mkdir -p "$APP_BUNDLE/Contents/Resources"
+# Generate icon if iconset folder is missing
+if [ ! -d "$ICONSET_DIR" ]; then
+    echo "🎨 Generating app icon..."
+    ./generate_icon.sh
+fi
+
+# Compile iconset → .icns
+echo "🎨 Compiling app icon..."
+TMPSET=$(mktemp -d)
+cp -r "$ICONSET_DIR" "$TMPSET/AppIcon.iconset"
+iconutil -c icns -o "$RESOURCES_DIR/AppIcon.icns" "$TMPSET/AppIcon.iconset"
+rm -rf "$TMPSET"
 
 # Compile Swift source
 echo "📦 Compiling Swift source..."
 swiftc main.swift \
     -parse-as-library \
-    -o "$APP_BUNDLE/Contents/MacOS/$APP_NAME" \
+    -o "$MACOS_DIR/$APP_NAME" \
     -suppress-warnings
 
-# Make executable
-chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+chmod +x "$MACOS_DIR/$APP_NAME"
 
-# Create Info.plist
-cat > "$APP_BUNDLE/Contents/Info.plist" << 'EOF'
+# Write Info.plist — LSUIElement suppresses dock icon
+cat > "$CONTENTS_DIR/Info.plist" << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleDevelopmentRegion</key>
-    <string>en</string>
     <key>CFBundleExecutable</key>
     <string>PrivateCopyClip</string>
     <key>CFBundleIdentifier</key>
-    <string>com.privatecopy.clipboard</string>
-    <key>CFBundleInfoDictionaryVersion</key>
-    <string>6.0</string>
+    <string>com.bogdantudorache.PrivateCopyClip</string>
     <key>CFBundleName</key>
+    <string>PrivateCopyClip</string>
+    <key>CFBundleDisplayName</key>
     <string>PrivateCopyClip</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>2.0</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>2</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
-    <string>12.0</string>
-    <key>NSMainStoryboardFile</key>
-    <string></string>
+    <string>13.0</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
-    <key>NSRequiresIPhoneOS</key>
-    <false/>
-    <key>UIDeviceFamily</key>
-    <array>
-        <integer>1</integer>
-    </array>
-    <key>UIMainStoryboardFile</key>
-    <string>Main</string>
-    <key>UIRequiredDeviceCapabilities</key>
-    <array>
-        <string>armv7</string>
-    </array>
-    <key>UISupportedInterfaceOrientations</key>
-    <array>
-        <string>UIInterfaceOrientationPortrait</string>
-        <string>UIInterfaceOrientationLandscapeLeft</string>
-        <string>UIInterfaceOrientationLandscapeRight</string>
-    </array>
+    <key>LSUIElement</key>
+    <true/>
 </dict>
 </plist>
 EOF
 
-echo "✅ Build successful!"
-echo "📱 App bundle: $APP_BUNDLE"
 echo ""
-echo "📋 To run:"
-echo "   open \"$APP_BUNDLE\""
+echo "✅ Build complete!"
+echo "   $BUILD_DIR/$APP_NAME.app"
 echo ""
-echo "📱 To install to Applications folder:"
-echo "   cp -r \"$APP_BUNDLE\" /Applications/"
+
+# Install to Applications
+echo "📦 Installing to /Applications..."
+rm -rf "/Applications/$APP_NAME.app"
+cp -r "$BUILD_DIR/$APP_NAME.app" "/Applications/"
+echo "✅ Installed: /Applications/$APP_NAME.app"
+echo ""
+echo "▶  open /Applications/$APP_NAME.app"
