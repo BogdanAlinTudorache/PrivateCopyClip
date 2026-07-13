@@ -39,7 +39,8 @@ swiftc main.swift \
 chmod +x "$MACOS_DIR/$APP_NAME"
 
 # Write Info.plist — LSUIElement suppresses dock icon
-cat > "$CONTENTS_DIR/Info.plist" << 'EOF'
+SOURCE_REPO_PATH="$(pwd)"
+cat > "$CONTENTS_DIR/Info.plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -55,15 +56,17 @@ cat > "$CONTENTS_DIR/Info.plist" << 'EOF'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.0.1</string>
+    <string>3.0.0</string>
     <key>CFBundleVersion</key>
-    <string>3</string>
+    <string>4</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>SourceRepoPath</key>
+    <string>${SOURCE_REPO_PATH}</string>
     <key>LSUIElement</key>
     <true/>
 </dict>
