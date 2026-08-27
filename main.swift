@@ -1,6 +1,7 @@
 import SwiftUI
 import Foundation
 import ServiceManagement
+import ImageIO
 
 extension Color {
     init(hex: String) {
@@ -188,15 +189,51 @@ final class ClipboardStorage {
         try? pngData.write(to: file, options: .atomic)
     }
 
+    // Full-resolution decode. Only used when copying an image back to the
+    // pasteboard — NEVER from a SwiftUI body (see `thumbnail` for that).
     func loadImage(fileName: String) -> NSImage? {
         let file = imagesDir.appendingPathComponent(fileName)
         guard let data = try? Data(contentsOf: file) else { return nil }
         return NSImage(data: data)
     }
 
+    // Bounded in-memory cache of downscaled thumbnails. This is what stops the
+    // memory blow-up: previously every row re-render decoded the full-res image
+    // (a 660 KB PNG → 16 MB RGBA), and dozens of those copies were retained.
+    private let thumbnailCache: NSCache<NSString, NSImage> = {
+        let c = NSCache<NSString, NSImage>()
+        c.countLimit = 200
+        c.totalCostLimit = 64 * 1024 * 1024   // hard 64 MB ceiling
+        return c
+    }()
+
+    /// Thumbnail for list display. Uses ImageIO to decode DIRECTLY at the target
+    /// size, so the full-resolution bitmap is never allocated. Cached so repeated
+    /// SwiftUI re-renders reuse one small decode instead of making new ones.
+    func thumbnail(fileName: String, maxPixelSize: Int = 400) -> NSImage? {
+        let key = "\(fileName)@\(maxPixelSize)" as NSString
+        if let cached = thumbnailCache.object(forKey: key) { return cached }
+
+        let file = imagesDir.appendingPathComponent(fileName)
+        guard let src = CGImageSourceCreateWithURL(file as CFURL, nil) else { return nil }
+
+        let opts: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+
+        let img = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+        thumbnailCache.setObject(img, forKey: key, cost: cg.width * cg.height * 4)
+        return img
+    }
+
     func deleteImage(fileName: String) {
         let file = imagesDir.appendingPathComponent(fileName)
         try? FileManager.default.removeItem(at: file)
+        thumbnailCache.removeObject(forKey: "\(fileName)@400" as NSString)
     }
 
     func deleteAll() {
@@ -462,6 +499,7 @@ struct ClipboardEntryRow: View {
 
     @State private var isHovered = false
     @State private var isRevealed = false
+    @State private var thumbnail: NSImage? = nil
     @Environment(\.tokyoPalette) private var tokyo
 
     private var timeString: String {
@@ -561,14 +599,26 @@ struct ClipboardEntryRow: View {
         }
         .onTapGesture { onTap() }
         .cursor(.pointingHand)
+        .task(id: entry.id) { await loadThumbnail() }
+    }
+
+    // Decode the thumbnail OFF the render path (never inside `body`), once per
+    // row identity. Repeated re-renders just reuse the cached `thumbnail`.
+    private func loadThumbnail() async {
+        guard thumbnail == nil,
+              entry.contentType == .image,
+              let fileName = entry.imageFileName else { return }
+        let img = await Task.detached(priority: .utility) {
+            ClipboardStorage.shared.thumbnail(fileName: fileName)
+        }.value
+        await MainActor.run { thumbnail = img }
     }
 
     @ViewBuilder
     private var imageContent: some View {
-        if let fileName = entry.imageFileName,
-           let img = ClipboardStorage.shared.loadImage(fileName: fileName) {
+        if let thumb = thumbnail {
             HStack(spacing: 8) {
-                Image(nsImage: img)
+                Image(nsImage: thumb)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(maxHeight: 60)
