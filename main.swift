@@ -72,7 +72,7 @@ struct ClipboardEntry: Codable, Identifiable {
 }
 
 struct DateGroup: Identifiable {
-    let id = UUID()
+    let id: String      // stable label-derived; lets SwiftUI diff instead of always recreating
     let label: String
     let entries: [ClipboardEntry]
 }
@@ -324,37 +324,31 @@ final class ClipboardMonitor: NSObject, ObservableObject {
 
     // MARK: Insert (with duplicate detection)
 
+    // Called only from poll(), which runs on the main thread via Timer.
     private func insertText(_ text: String, isSensitive: Bool = false) {
         guard text.utf8.count <= 1_000_000 else { return }
 
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-
-            if let idx = self.entries.firstIndex(where: { $0.contentType == .text && $0.text == text }) {
-                var existing = self.entries.remove(at: idx)
-                existing.timestamp = Date()
-                if !existing.isPinned {
-                    self.entries.insert(existing, at: 0)
-                } else {
-                    self.entries.insert(existing, at: 0)
-                }
-            } else {
-                var entry = ClipboardEntry(
-                    id: UUID(), timestamp: Date(), text: text,
-                    preview: String(text.prefix(80)), byteSize: text.utf8.count,
-                    contentType: .text
-                )
-                entry.isSensitive = isSensitive
-                self.entries.insert(entry, at: 0)
-            }
-
-            self.enforceLimit()
-            self.rebuildGroups()
-            self.isDirty = true
-            ClipboardStorage.shared.save(self.entries)
+        if let idx = entries.firstIndex(where: { $0.contentType == .text && $0.text == text }) {
+            var existing = entries.remove(at: idx)
+            existing.timestamp = Date()
+            entries.insert(existing, at: 0)
+        } else {
+            var entry = ClipboardEntry(
+                id: UUID(), timestamp: Date(), text: text,
+                preview: String(text.prefix(80)), byteSize: text.utf8.count,
+                contentType: .text
+            )
+            entry.isSensitive = isSensitive
+            entries.insert(entry, at: 0)
         }
+
+        enforceLimit()
+        rebuildGroups()
+        isDirty = true
+        ClipboardStorage.shared.save(entries)
     }
 
+    // Called only from poll(), which runs on the main thread via Timer.
     private func insertImage(_ pngData: Data) {
         let id = UUID()
         let fileName = "\(id.uuidString).png"
@@ -366,19 +360,16 @@ final class ClipboardMonitor: NSObject, ObservableObject {
 
         ClipboardStorage.shared.saveImage(id: id, pngData: pngData)
 
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            let entry = ClipboardEntry(
-                id: id, timestamp: Date(), text: nil,
-                preview: preview, byteSize: pngData.count,
-                contentType: .image, imageFileName: fileName
-            )
-            self.entries.insert(entry, at: 0)
-            self.enforceLimit()
-            self.rebuildGroups()
-            self.isDirty = true
-            ClipboardStorage.shared.save(self.entries)
-        }
+        let entry = ClipboardEntry(
+            id: id, timestamp: Date(), text: nil,
+            preview: preview, byteSize: pngData.count,
+            contentType: .image, imageFileName: fileName
+        )
+        entries.insert(entry, at: 0)
+        enforceLimit()
+        rebuildGroups()
+        isDirty = true
+        ClipboardStorage.shared.save(entries)
     }
 
     private func enforceLimit() {
@@ -451,17 +442,17 @@ final class ClipboardMonitor: NSObject, ObservableObject {
         let pinned = entries.filter { $0.isPinned }
         let unpinned = entries.filter { !$0.isPinned }
 
-        if !pinned.isEmpty { groups.append(DateGroup(label: "PINNED", entries: pinned)) }
+        if !pinned.isEmpty { groups.append(DateGroup(id: "PINNED",  label: "PINNED", entries: pinned)) }
 
         let tenMin    = unpinned.filter { now.timeIntervalSince($0.timestamp) <= 600 }
         let hourOnly  = unpinned.filter { let t = now.timeIntervalSince($0.timestamp); return t > 600 && t <= 3600 }
         let todayOnly = unpinned.filter { let t = now.timeIntervalSince($0.timestamp); return t > 3600 && t <= 86400 }
         let older     = unpinned.filter { now.timeIntervalSince($0.timestamp) > 86400 }
 
-        if !tenMin.isEmpty    { groups.append(DateGroup(label: "LAST 10 MINUTES", entries: tenMin)) }
-        if !hourOnly.isEmpty  { groups.append(DateGroup(label: "LAST HOUR",       entries: hourOnly)) }
-        if !todayOnly.isEmpty { groups.append(DateGroup(label: "TODAY",            entries: todayOnly)) }
-        if !older.isEmpty     { groups.append(DateGroup(label: "OLDER",            entries: older)) }
+        if !tenMin.isEmpty    { groups.append(DateGroup(id: "LAST10", label: "LAST 10 MINUTES", entries: tenMin)) }
+        if !hourOnly.isEmpty  { groups.append(DateGroup(id: "LASTH",  label: "LAST HOUR",       entries: hourOnly)) }
+        if !todayOnly.isEmpty { groups.append(DateGroup(id: "TODAY",  label: "TODAY",            entries: todayOnly)) }
+        if !older.isEmpty     { groups.append(DateGroup(id: "OLDER",  label: "OLDER",            entries: older)) }
 
         groupedEntries = groups
     }
@@ -668,7 +659,7 @@ struct ClipboardHistoryView: View {
             let hits = group.entries.filter {
                 ($0.text ?? $0.preview).localizedCaseInsensitiveContains(searchText)
             }
-            return hits.isEmpty ? nil : DateGroup(label: group.label, entries: hits)
+            return hits.isEmpty ? nil : DateGroup(id: group.id, label: group.label, entries: hits)
         }
     }
 
